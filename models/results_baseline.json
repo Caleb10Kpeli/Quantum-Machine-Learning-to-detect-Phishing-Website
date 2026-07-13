@@ -1,0 +1,18 @@
+{
+  "baseline_qsvm": {
+    "label": "Baseline QSVM (single-layer feature map)",
+    "architecture": "RX embed + linear CNOT (1 layer, no bidirectional entanglement)",
+    "accuracy": 0.88,
+    "precision": 0.8654,
+    "recall": 0.9,
+    "f1": 0.8824
+  },
+  "baseline_qnn": {
+    "label": "Baseline QNN (BasicEntanglerLayers, 18 params)",
+    "architecture": "AngleEmbedding + RY-only BasicEntanglerLayers (18 parameters)",
+    "accuracy": 0.81,
+    "precision": 0.7925,
+    "recall": 0.84,
+    "f1": 0.8155
+  }
+}

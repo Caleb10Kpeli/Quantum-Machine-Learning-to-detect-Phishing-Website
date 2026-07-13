@@ -1,0 +1,46 @@
+{
+  "classical_full": {
+    "label": "Classical SVM (Full)",
+    "samples": 9144,
+    "features": 87,
+    "accuracy": 0.9541,
+    "precision": 0.9577,
+    "recall": 0.9501,
+    "f1": 0.9539,
+    "description": "Classical RBF-SVM trained on all 87 features and 9,144 samples. This is the model used in the live URL analyser."
+  },
+  "classical_fair": {
+    "label": "Classical SVM (Fair)",
+    "samples": 200,
+    "features": 6,
+    "accuracy": 0.86,
+    "precision": 0.8333,
+    "recall": 0.9,
+    "f1": 0.8654,
+    "description": "Classical RBF-SVM constrained to the same 6 features and 200 samples as the quantum models. Used as the fair head-to-head baseline \u00e2\u20ac\u201d not the live analyser model."
+  },
+  "qsvm": {
+    "label": "QSVM (Quantum Kernel)",
+    "samples": 200,
+    "features": 6,
+    "qubits": 6,
+    "accuracy": 0.86,
+    "precision": 0.8462,
+    "recall": 0.88,
+    "f1": 0.8627,
+    "description": "Quantum SVM using a 6-qubit PennyLane circuit with ZZ-style feature map. Trained on the same 200 samples and 6 features as the fair classical SVM."
+  },
+  "qnn": {
+    "label": "QNN (Variational Circuit)",
+    "samples": 200,
+    "features": 6,
+    "qubits": 6,
+    "layers": 3,
+    "epochs": 100,
+    "accuracy": 0.89,
+    "precision": 0.8421,
+    "recall": 0.96,
+    "f1": 0.8972,
+    "description": "Variational QNN with 3 layers (Rot+CNOT) on 6 qubits. Trained with Adam (lr=0.01) for 100 epochs on 200 samples."
+  }
+}

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phishing Detector | Hybrid QML</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+<!-- ── Status bar ───────────────────────────────────────────────────────────── -->
+<div class="status-bar">
+  <span class="status-pips">
+    <span class="pip pip-done"    title="Classical SVM"></span>
+    <span class="pip pip-done"    title="QSVM"></span>
+    <span class="pip pip-{% if results.qnn is defined %}done{% else %}pending{% endif %}" title="QNN"></span>
+    <span class="pip pip-pending" title="Report"></span>
+  </span>
+  {% if results.qnn is defined %}
+    <strong>3 / 4 models complete</strong> &mdash; Classical SVM &bull; QSVM &bull; QNN &bull; Report pending
+  {% else %}
+    <strong>2 / 4 models complete</strong> &mdash; Classical SVM &bull; QSVM &bull; QNN training &bull; Report pending
+  {% endif %}
+</div>
+
+<!-- ── Header ──────────────────────────────────────────────────────────────── -->
+<header>
+  <div class="container">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="shield">&#x1F6E1;</span>
+        <div>
+          <h1>Phishing Detector</h1>
+          <p class="subtitle">Hybrid Quantum Machine Learning </p>
+        </div>
+      </div>
+      <nav>
+        <a href="#analyser">Analyser</a>
+        <a href="#comparison">Model Comparison</a>
+        <a href="#how-it-works">How It Works</a>
+      </nav>
+    </div>
+  </div>
+</header>
+
+<!-- ── Hero / Analyser ─────────────────────────────────────────────────────── -->
+<section id="analyser" class="hero">
+  <div class="container">
+    <h2>Analyse a URL</h2>
+    <p class="hero-caption">
+      Powered by Classical SVM &mdash; 95.41% accuracy on 11,430 URLs
+    </p>
+
+    <!-- Model selector -->
+    <div class="model-selector">
+      <div class="model-tab active" data-model="classical">
+        <div class="tab-name">Classical SVM (Fair)</div>
+        <div class="tab-stat">86.00% &bull; 6 features &bull; ~10s</div>
+      </div>
+      <div class="model-tab" data-model="qsvm">
+        <div class="tab-name">QSVM</div>
+        <div class="tab-stat">86.00% &bull; quantum kernel &bull; ~10s</div>
+      </div>
+      <div class="model-tab {% if not qnn_ok %}tab-disabled{% endif %}" data-model="qnn">
+        <div class="tab-name">QNN {% if not qnn_ok %}<span class="tab-pill">Training…</span>{% endif %}</div>
+        <div class="tab-stat">{% if qnn_ok %}{{ "%.2f"|format(results.qnn.accuracy * 100) }}% &bull; variational &bull; ~10s{% else %}run python src/qnn.py{% endif %}</div>
+      </div>
+    </div>
+
+    <!-- Content fetch note (shown for all 3 tabs — all use same 6 features) -->
+    <div id="qsvm-note" class="model-note">
+      All 3 models use the same 6 features: hyperlink ratios (live page fetch), domain age (WHOIS) and Google index.
+      <strong>Takes ~10 seconds.</strong>
+    </div>
+
+    <form id="analyse-form" autocomplete="off">
+      <input type="hidden" id="selected-model" name="model" value="classical">
+      <div class="input-row">
+        <input
+          type="text"
+          id="url-input"
+          name="url"
+          placeholder="e.g. http://paypal-login-secure.tk/verify?account=123"
+          required
+        />
+        <button type="submit" id="analyse-btn">Analyse</button>
+      </div>
+    </form>
+
+    <div class="sample-urls">
+      <span class="try-label">Try (live sites):</span>
+      <button class="chip chip-legit" data-url="https://www.bbc.com">BBC</button>
+      <button class="chip chip-legit" data-url="https://www.amazon.com">Amazon</button>
+      <button class="chip chip-legit" data-url="https://www.reuters.com">Reuters</button>
+      <button class="chip chip-legit" data-url="https://www.yahoo.com">Yahoo</button>
+      <button class="chip chip-legit" data-url="https://www.python.org">Python.org</button>
+    </div>
+    <p class="sample-note">
+      These models analyse live page content &mdash; phishing URLs that are offline return all-zero features and cannot be reliably classified.
+    </p>
+
+    <!-- Result panel (hidden until analysis runs) -->
+    <div id="result-panel" class="result-panel hidden">
+
+      <div id="result-banner"></div>
+
+      <div id="model-badge-row" class="model-badge-row hidden">
+        <span class="model-badge">
+          <span class="model-badge-dot" id="model-badge-dot"></span>
+          <span id="model-badge-text"></span>
+        </span>
+      </div>
+
+      <div id="confidence-wrap" class="confidence-wrap hidden">
+        <div class="confidence-header">
+          <span>Classifier confidence</span>
+          <span id="confidence-label-pct"></span>
+        </div>
+        <div class="confidence-track">
+          <div id="confidence-fill" class="confidence-fill"></div>
+        </div>
+      </div>
+
+      <div class="features-grid" id="features-grid"></div>
+
+      <!-- Quantum features panel (QSVM only) -->
+      <div id="quantum-panel" class="quantum-panel hidden">
+        <div class="quantum-panel-title">Quantum Model Inputs (live-fetched)</div>
+        <div id="quantum-grid" class="quantum-grid"></div>
+      </div>
+
+      <details class="estimated-note" id="estimated-note">
+        <summary></summary>
+        <p id="estimated-list"></p>
+      </details>
+
+    </div>
+
+    <div id="loading" class="loading hidden">
+      <div class="spinner"></div>
+      <span>Extracting features&hellip;</span>
+    </div>
+
+    <div id="error-msg" class="error-msg hidden"></div>
+  </div>
+</section>
+
+<!-- ── Model Comparison ─────────────────────────────────────────────────────── -->
+<section id="comparison" class="section-alt">
+  <div class="container">
+    <h2>Model Comparison</h2>
+    <p class="section-caption">
+      All models trained on the PhiUSIIL dataset (11,430 URLs, 50/50 balanced).
+    </p>
+
+    <div class="cards-row">
+
+      <!-- Classical SVM (Full) -->
+      <div class="model-card">
+        <div class="card-title">Classical SVM <span style="font-size:0.75rem;font-weight:400;color:var(--muted)">(Full)</span></div>
+        <div class="card-badge">Live Analyser Model</div>
+        <div class="card-meta">{{ results.classical_full.samples }} samples &bull; {{ results.classical_full.features }} features</div>
+        <div class="card-metrics">
+          <div class="metric"><span class="metric-label">Accuracy</span><span class="metric-value">{{ "%.2f"|format(results.classical_full.accuracy * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">Precision</span><span class="metric-value">{{ "%.2f"|format(results.classical_full.precision * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">Recall</span><span class="metric-value">{{ "%.2f"|format(results.classical_full.recall * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">F1 Score</span><span class="metric-value">{{ "%.2f"|format(results.classical_full.f1 * 100) }}%</span></div>
+        </div>
+        <p class="card-desc">{{ results.classical_full.description }}</p>
+      </div>
+
+      <!-- Classical SVM (Fair) -->
+      <div class="model-card">
+        <div class="card-title">Classical SVM <span style="font-size:0.75rem;font-weight:400;color:var(--muted)">(Fair)</span></div>
+        <div class="card-badge badge-grey">Constrained Baseline</div>
+        <div class="card-meta">{{ results.classical_fair.samples }} samples &bull; {{ results.classical_fair.features }} features</div>
+        <div class="card-metrics">
+          <div class="metric"><span class="metric-label">Accuracy</span><span class="metric-value">{{ "%.2f"|format(results.classical_fair.accuracy * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">Precision</span><span class="metric-value">{{ "%.2f"|format(results.classical_fair.precision * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">Recall</span><span class="metric-value">{{ "%.2f"|format(results.classical_fair.recall * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">F1 Score</span><span class="metric-value">{{ "%.2f"|format(results.classical_fair.f1 * 100) }}%</span></div>
+        </div>
+        <p class="card-desc">{{ results.classical_fair.description }}</p>
+      </div>
+
+      <!-- QSVM -->
+      <div class="model-card card-highlight">
+        <div class="card-title">QSVM</div>
+        <div class="card-badge badge-quantum">Quantum Kernel</div>
+        <div class="card-meta">{{ results.qsvm.samples }} samples &bull; {{ results.qsvm.features }} features &bull; {{ results.qsvm.qubits }} qubits</div>
+        <div class="card-metrics">
+          <div class="metric"><span class="metric-label">Accuracy</span><span class="metric-value">{{ "%.2f"|format(results.qsvm.accuracy * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">Precision</span><span class="metric-value">{{ "%.2f"|format(results.qsvm.precision * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">Recall</span><span class="metric-value">{{ "%.2f"|format(results.qsvm.recall * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">F1 Score</span><span class="metric-value">{{ "%.2f"|format(results.qsvm.f1 * 100) }}%</span></div>
+        </div>
+        <p class="card-desc">{{ results.qsvm.description }}</p>
+      </div>
+
+      <!-- QNN (trained or coming-soon) -->
+      {% if results.qnn is defined %}
+      <div class="model-card card-highlight">
+        <div class="card-title">QNN</div>
+        <div class="card-badge badge-quantum">Variational Circuit</div>
+        <div class="card-meta">{{ results.qnn.samples }} samples &bull; {{ results.qnn.features }} features &bull; {{ results.qnn.qubits }} qubits &bull; {{ results.qnn.layers }} layers</div>
+        <div class="card-metrics">
+          <div class="metric"><span class="metric-label">Accuracy</span><span class="metric-value">{{ "%.2f"|format(results.qnn.accuracy * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">Precision</span><span class="metric-value">{{ "%.2f"|format(results.qnn.precision * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">Recall</span><span class="metric-value">{{ "%.2f"|format(results.qnn.recall * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">F1 Score</span><span class="metric-value">{{ "%.2f"|format(results.qnn.f1 * 100) }}%</span></div>
+        </div>
+        <p class="card-desc">{{ results.qnn.description }}</p>
+      </div>
+      {% else %}
+      <div class="model-card card-coming-soon">
+        <div class="card-title">QNN</div>
+        <div class="card-badge badge-quantum">Variational Circuit</div>
+        <div class="card-meta">200 samples &bull; 6 features &bull; 6 qubits &bull; 3 layers</div>
+        <div class="coming-soon-body">
+          <div class="training-pulse"></div>
+          <p>Training in progress</p>
+          <p class="cs-note">100 epochs &bull; Adam (lr=0.01) &bull; backprop</p>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+
+    <!-- Bar chart (CSS-based) -->
+    <div class="chart-section">
+      <h3>Accuracy at a Glance</h3>
+      <div class="bar-chart">
+
+        <div class="bar-row">
+          <span class="bar-label">Classical SVM (Full)</span>
+          <div class="bar-track">
+            <div class="bar-fill bar-classical" style="width:0%" data-target="{{ results.classical_full.accuracy * 100 }}">
+              <span class="bar-pct">{{ "%.1f"|format(results.classical_full.accuracy * 100) }}%</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bar-row">
+          <span class="bar-label">Classical SVM (Fair)</span>
+          <div class="bar-track">
+            <div class="bar-fill bar-classical-fair" style="width:0%" data-target="{{ results.classical_fair.accuracy * 100 }}">
+              <span class="bar-pct">{{ "%.1f"|format(results.classical_fair.accuracy * 100) }}%</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bar-row">
+          <span class="bar-label">QSVM (Quantum Kernel)</span>
+          <div class="bar-track">
+            <div class="bar-fill bar-quantum" style="width:0%" data-target="{{ results.qsvm.accuracy * 100 }}">
+              <span class="bar-pct">{{ "%.1f"|format(results.qsvm.accuracy * 100) }}%</span>
+            </div>
+          </div>
+        </div>
+
+        {% if results.qnn is defined %}
+        <div class="bar-row">
+          <span class="bar-label">QNN (Variational)</span>
+          <div class="bar-track">
+            <div class="bar-fill bar-quantum" style="width:0%" data-target="{{ results.qnn.accuracy * 100 }}">
+              <span class="bar-pct">{{ "%.1f"|format(results.qnn.accuracy * 100) }}%</span>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="bar-row">
+          <span class="bar-label" style="color:var(--border)">QNN (Variational)</span>
+          <div class="bar-track">
+            <div class="bar-fill" style="width:0%;background:var(--border)">
+              <span class="bar-pct" style="color:var(--muted)">training&hellip;</span>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+      </div>
+    </div>
+
+    <div class="finding-box">
+      <h3>Key Finding</h3>
+      {% if results.qnn is defined %}
+      <p>
+        When constrained to the <strong>same 6 features and 200 training samples</strong>,
+        both quantum models match the Classical SVM (Fair) baseline.
+        The QSVM achieves <strong>{{ "%.1f"|format(results.qsvm.accuracy * 100) }}% accuracy</strong>
+        with higher precision ({{ "%.2f"|format(results.qsvm.precision * 100) }}% vs
+        {{ "%.2f"|format(results.classical_fair.precision * 100) }}%) &mdash; fewer false alarms.
+        The QNN achieves <strong>{{ "%.1f"|format(results.qnn.accuracy * 100) }}% accuracy</strong>
+        via end-to-end variational training.
+        Note: the live analyser uses the <strong>full Classical SVM ({{ "%.1f"|format(results.classical_full.accuracy * 100) }}%)</strong>,
+        which has 45&times; more training data and 14&times; more features than the quantum models.
+      </p>
+      {% else %}
+      <p>
+        When constrained to the <strong>same 6 features and 200 training samples</strong>,
+        the QSVM matches the Classical SVM (Fair) baseline at
+        <strong>{{ "%.0f"|format(results.qsvm.accuracy * 100) }}% accuracy</strong>
+        while achieving higher precision
+        ({{ "%.2f"|format(results.qsvm.precision * 100) }}% vs
+        {{ "%.2f"|format(results.classical_fair.precision * 100) }}%) &mdash; meaning fewer false alarms.
+        Note: the live analyser uses the <strong>full Classical SVM ({{ "%.1f"|format(results.classical_full.accuracy * 100) }}%)</strong>,
+        which has 45&times; more training data and 14&times; more features.
+        <em>QNN results will appear here once training completes.</em>
+      </p>
+      {% endif %}
+    </div>
+
+  </div>
+</section>
+
+<!-- ── How It Works ─────────────────────────────────────────────────────────── -->
+<section id="how-it-works" class="section">
+  <div class="container">
+    <h2>How It Works</h2>
+
+    <div class="how-grid">
+
+      <div class="how-card">
+        <div class="how-icon">1</div>
+        <h3>Feature Extraction</h3>
+        <p>
+          87 URL-based features are extracted from each link: length, special characters,
+          HTTPS usage, domain age, hyperlink ratios, phishing keywords, and more.
+          Live extraction uses DNS lookups and WHOIS data where available.
+        </p>
+      </div>
+
+      <div class="how-card">
+        <div class="how-icon">2</div>
+        <h3>Quantum Kernel (QSVM)</h3>
+        <p>
+          The top 6 features are angle-encoded into a 6-qubit PennyLane circuit.
+          A ZZ-style feature map computes the quantum kernel
+          K(x,x&prime;) = |&lang;&phi;(x&prime;)|&phi;(x)&rang;|&sup2;,
+          which is fed into a classical SVM solver.
+        </p>
+      </div>
+
+      <div class="how-card">
+        <div class="how-icon">3</div>
+        <h3>Variational QNN</h3>
+        <p>
+          A second quantum model uses 3 layers of trainable Rot gates with ring CNOT
+          entanglement. The PauliZ expectation value on qubit 0 acts as the classifier
+          output, trained end-to-end with Adam gradient descent.
+        </p>
+      </div>
+
+      <div class="how-card">
+        <div class="how-icon">4</div>
+        <h3>Classical Baseline</h3>
+        <p>
+          An RBF-SVM trained on all 87 features and 9,144 samples provides the
+          gold-standard comparison. The live URL analyser uses this model for
+          instant, high-accuracy predictions.
+        </p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── Footer ───────────────────────────────────────────────────────────────── -->
+<footer>
+  <div class="container">
+    <p>
+      Hybrid Quantum Machine Learning for Phishing Website Detection &mdash;
+       Dataset: PhiUSIIL (11,430 URLs)
+    </p>
+  </div>
+</footer>
+
+<script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>
