@@ -30,6 +30,8 @@ const healthWarnings  = document.getElementById('health-warnings');
 const consensusPanel  = document.getElementById('consensus-panel');
 const consensusSummary = document.getElementById('consensus-summary');
 const consensusTable  = document.getElementById('consensus-table');
+const siteWarning     = document.getElementById('site-warning');
+const consensusSiteWarning = document.getElementById('consensus-site-warning');
 
 const LOW_CONFIDENCE_THRESHOLD = 25; // below this, flag as borderline
 
@@ -118,8 +120,21 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
+// ── Site status warning (dead/unreachable URL detected during analysis) ────────
+function applySiteStatus(el, siteStatus) {
+  if (siteStatus && siteStatus.verdict !== 'live') {
+    const icon = siteStatus.verdict === 'dead' ? '✕' : '⚠';
+    el.textContent = `${icon} ${siteStatus.message}`;
+    el.className = 'site-warning site-warning-' + siteStatus.verdict;
+  } else {
+    el.textContent = '';
+    el.className = 'site-warning hidden';
+  }
+}
+
 // ── Render result ─────────────────────────────────────────────────────────────
 function renderResult(data) {
+  applySiteStatus(siteWarning, data.site_status);
   const isPhishing = data.label === 'phishing';
 
   // Banner
@@ -289,6 +304,7 @@ compareAllBtn.addEventListener('click', async () => {
 });
 
 function renderConsensus(data) {
+  applySiteStatus(consensusSiteWarning, data.site_status);
   const total = data.models.length;
   const agree = total - data.dissenters.length;
   consensusSummary.textContent = data.unanimous

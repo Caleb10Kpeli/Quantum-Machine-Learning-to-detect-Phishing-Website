@@ -187,7 +187,9 @@ def fetch_content_features(url, feature_list):
     """
     Fetches real-time page content and WHOIS data to populate quantum model features.
     Unknown features default to training-data means (not 0) to avoid biasing the model.
-    Returns (feature_dict, estimated_set).
+    Returns (feature_dict, estimated_set, site_reachable) — site_reachable is False
+    if the live page request itself failed (dead/unreachable URL), independent of
+    which individual features ended up estimated.
     """
     estimated = set()
     # Start with neutral (mean) defaults, not zero
@@ -198,6 +200,7 @@ def fetch_content_features(url, feature_list):
 
     # ── Fetch page → hyperlink counts ─────────────────────────────────────
     page_html = None
+    site_reachable = True
     try:
         resp = requests.get(
             url, timeout=8,
@@ -206,6 +209,7 @@ def fetch_content_features(url, feature_list):
         )
         page_html = resp.text
     except Exception:
+        site_reachable = False
         for f in ['nb_hyperlinks', 'ratio_intHyperlinks', 'ratio_extHyperlinks', 'google_index']:
             if f in vals:
                 estimated.add(f)
@@ -251,7 +255,7 @@ def fetch_content_features(url, feature_list):
     if 'web_traffic' in vals:
         estimated.add('web_traffic')
 
-    return vals, estimated
+    return vals, estimated, site_reachable
 
 
 # ── Shared URL feature display ─────────────────────────────────────────────────
@@ -458,13 +462,21 @@ def get_ssl_info(hostname, timeout=6):
         return {'available': False, 'error': str(e)}
 
 
-def check_site_health(url):
+def resolve_dns(url):
+    """Returns (dns_ok, resolved_ip_or_None, hostname)."""
     full_url = url if url.startswith('http') else 'http://' + url
     hostname = urlparse(full_url).hostname or full_url
-
     try:
-        resolved_ip = socket.gethostbyname(hostname)
+        return True, socket.gethostbyname(hostname), hostname
     except Exception:
+        return False, None, hostname
+
+
+def check_site_health(url):
+    full_url = url if url.startswith('http') else 'http://' + url
+    dns_ok, resolved_ip, hostname = resolve_dns(url)
+
+    if not dns_ok:
         return {
             'reachable': False, 'verdict': 'dead', 'dns_ok': False,
             'message': 'DNS lookup failed — this domain does not resolve to anything.',
@@ -520,6 +532,23 @@ def check_site_health(url):
     }
 
 
+def build_site_status(dns_ok, site_reachable):
+    """Cheap liveness summary for the main analyse flow (no redirect/SSL detail — see /site-health for that)."""
+    if not dns_ok:
+        return {
+            'verdict': 'dead',
+            'message': 'This URL appears to be dead — its domain does not resolve. '
+                       'The prediction below falls back to default feature values and may be unreliable.',
+        }
+    if not site_reachable:
+        return {
+            'verdict': 'unreachable',
+            'message': 'This URL\'s domain resolves but the server did not respond. '
+                       'The prediction below falls back to default feature values and may be unreliable.',
+        }
+    return {'verdict': 'live', 'message': None}
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/')
 def index():
@@ -551,7 +580,8 @@ def analyse():
     features, base_estimated = extract_features(url)
     kf = build_key_features(features)
 
-    content_vals, content_estimated = fetch_content_features(url, _MODEL_FEATURE_LISTS[model])
+    dns_ok, _, _ = resolve_dns(url)
+    content_vals, content_estimated, site_reachable = fetch_content_features(url, _MODEL_FEATURE_LISTS[model])
 
     pred = PREDICTORS[model](content_vals)
     if pred is None:
@@ -568,6 +598,7 @@ def analyse():
         'key_features':    kf,
         'estimated_count': len(content_estimated),
         'estimated_list':  sorted(content_estimated),
+        'site_status':     build_site_status(dns_ok, site_reachable),
     }
     if model in _MODELS_WITH_QUANTUM_PANEL:
         response['quantum_features'] = build_quantum_features(content_vals, content_estimated)
@@ -587,7 +618,8 @@ def analyse_all():
     # All 5 models currently share the same 6 MI-selected features, so one
     # live fetch (one page request, one WHOIS lookup) covers every model
     # instead of 5 separate ones.
-    content_vals, content_estimated = fetch_content_features(url, fair_svm_features)
+    dns_ok, _, _ = resolve_dns(url)
+    content_vals, content_estimated, site_reachable = fetch_content_features(url, fair_svm_features)
 
     model_results = []
     for key, fn in PREDICTORS.items():
@@ -610,6 +642,7 @@ def analyse_all():
         'vote_counts':       {'phishing': phishing_votes, 'legitimate': legit_votes},
         'dissenters':        dissenters,
         'unanimous':         len(dissenters) == 0,
+        'site_status':       build_site_status(dns_ok, site_reachable),
     })
 
 
