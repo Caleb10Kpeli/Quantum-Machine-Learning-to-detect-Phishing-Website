@@ -65,6 +65,14 @@
         <div class="tab-name">QNN {% if not qnn_ok %}<span class="tab-pill">Training…</span>{% endif %}</div>
         <div class="tab-stat">{% if qnn_ok %}{{ "%.2f"|format(results.qnn.accuracy * 100) }}% &bull; variational &bull; ~10s{% else %}run python src/qnn.py{% endif %}</div>
       </div>
+      <div class="model-tab {% if not qsvm_v2_ok %}tab-disabled{% endif %}" data-model="qsvm_v2">
+        <div class="tab-name">QSVM v2 {% if not qsvm_v2_ok %}<span class="tab-pill">N/A</span>{% endif %}</div>
+        <div class="tab-stat">{% if qsvm_v2_ok %}{{ "%.2f"|format(results.qsvm_reupload.accuracy * 100) }}% &bull; re-uploading &bull; ~10s{% else %}run python src/qsvm_reupload.py{% endif %}</div>
+      </div>
+      <div class="model-tab {% if not qnn_v2_ok %}tab-disabled{% endif %}" data-model="qnn_v2">
+        <div class="tab-name">QNN v2 {% if not qnn_v2_ok %}<span class="tab-pill">N/A</span>{% endif %}</div>
+        <div class="tab-stat">{% if qnn_v2_ok %}{{ "%.2f"|format(results.qnn_reupload.accuracy * 100) }}% &bull; re-uploading &bull; ~10s{% else %}run python src/qnn_reupload.py{% endif %}</div>
+      </div>
     </div>
 
     <!-- Content fetch note (shown for all 3 tabs — all use same 6 features) -->
@@ -99,6 +107,27 @@
       These models analyse live page content &mdash; phishing URLs that are offline return all-zero features and cannot be reliably classified.
     </p>
 
+    <div class="action-row">
+      <button type="button" id="check-health-btn" class="btn-secondary">Check if Site is Live</button>
+      <button type="button" id="compare-all-btn" class="btn-secondary">Compare All 5 Models</button>
+    </div>
+
+    <!-- Site Health panel (hidden until checked) -->
+    <div id="health-panel" class="health-panel hidden">
+      <div id="health-verdict" class="health-verdict"></div>
+      <div id="health-details" class="health-details"></div>
+      <div id="health-warnings" class="health-warnings"></div>
+    </div>
+
+    <!-- Model Consensus panel (hidden until run) -->
+    <div id="consensus-panel" class="consensus-panel hidden">
+      <div class="consensus-header">
+        <h3>Model Consensus</h3>
+        <span id="consensus-summary" class="consensus-summary"></span>
+      </div>
+      <div id="consensus-table" class="consensus-table"></div>
+    </div>
+
     <!-- Result panel (hidden until analysis runs) -->
     <div id="result-panel" class="result-panel hidden">
 
@@ -118,6 +147,9 @@
         </div>
         <div class="confidence-track">
           <div id="confidence-fill" class="confidence-fill"></div>
+        </div>
+        <div id="confidence-flag" class="confidence-flag hidden">
+          &#9888; Borderline confidence &mdash; recommend manual review
         </div>
       </div>
 
@@ -224,6 +256,38 @@
       </div>
       {% endif %}
 
+      <!-- QSVM v2 (Data Re-uploading) -->
+      {% if results.qsvm_reupload is defined %}
+      <div class="model-card card-highlight">
+        <div class="card-title">QSVM v2</div>
+        <div class="card-badge badge-improved">Data Re-uploading</div>
+        <div class="card-meta">{{ results.qsvm_reupload.samples }} samples &bull; {{ results.qsvm_reupload.features }} features &bull; {{ results.qsvm_reupload.qubits }} qubits &bull; {{ results.qsvm_reupload.reps }}x re-upload</div>
+        <div class="card-metrics">
+          <div class="metric"><span class="metric-label">Accuracy</span><span class="metric-value">{{ "%.2f"|format(results.qsvm_reupload.accuracy * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">Precision</span><span class="metric-value">{{ "%.2f"|format(results.qsvm_reupload.precision * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">Recall</span><span class="metric-value">{{ "%.2f"|format(results.qsvm_reupload.recall * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">F1 Score</span><span class="metric-value">{{ "%.2f"|format(results.qsvm_reupload.f1 * 100) }}%</span></div>
+        </div>
+        <p class="card-desc">{{ results.qsvm_reupload.description }}</p>
+      </div>
+      {% endif %}
+
+      <!-- QNN v2 (Data Re-uploading) -->
+      {% if results.qnn_reupload is defined %}
+      <div class="model-card card-highlight">
+        <div class="card-title">QNN v2</div>
+        <div class="card-badge badge-improved">Data Re-uploading</div>
+        <div class="card-meta">{{ results.qnn_reupload.samples }} samples &bull; {{ results.qnn_reupload.features }} features &bull; {{ results.qnn_reupload.qubits }} qubits &bull; {{ results.qnn_reupload.layers }} layers</div>
+        <div class="card-metrics">
+          <div class="metric"><span class="metric-label">Accuracy</span><span class="metric-value">{{ "%.2f"|format(results.qnn_reupload.accuracy * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">Precision</span><span class="metric-value">{{ "%.2f"|format(results.qnn_reupload.precision * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">Recall</span><span class="metric-value">{{ "%.2f"|format(results.qnn_reupload.recall * 100) }}%</span></div>
+          <div class="metric"><span class="metric-label">F1 Score</span><span class="metric-value">{{ "%.2f"|format(results.qnn_reupload.f1 * 100) }}%</span></div>
+        </div>
+        <p class="card-desc">{{ results.qnn_reupload.description }}</p>
+      </div>
+      {% endif %}
+
     </div>
 
     <!-- Bar chart (CSS-based) -->
@@ -278,12 +342,62 @@
         </div>
         {% endif %}
 
+        {% if results.qsvm_reupload is defined %}
+        <div class="bar-row">
+          <span class="bar-label">QSVM v2 (Re-upload)</span>
+          <div class="bar-track">
+            <div class="bar-fill bar-improved" style="width:0%" data-target="{{ results.qsvm_reupload.accuracy * 100 }}">
+              <span class="bar-pct">{{ "%.1f"|format(results.qsvm_reupload.accuracy * 100) }}%</span>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        {% if results.qnn_reupload is defined %}
+        <div class="bar-row">
+          <span class="bar-label">QNN v2 (Re-upload)</span>
+          <div class="bar-track">
+            <div class="bar-fill bar-improved" style="width:0%" data-target="{{ results.qnn_reupload.accuracy * 100 }}">
+              <span class="bar-pct">{{ "%.1f"|format(results.qnn_reupload.accuracy * 100) }}%</span>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
       </div>
     </div>
 
     <div class="finding-box">
       <h3>Key Finding</h3>
-      {% if results.qnn is defined %}
+      {% if results.qsvm_reupload is defined and results.qnn_reupload is defined %}
+      <p>
+        Starting from the QSVM/QNN above as a fixed baseline, we applied one isolated
+        architectural change to each &mdash; <strong>data re-uploading</strong>
+        (Perez-Salinas et al., 2020): re-encoding the same 6 classical features deeper
+        into the circuit instead of once. Everything else (qubits, data split, training
+        budget, and for the QNN, even the parameter count) was held fixed, so the result
+        is attributable to re-uploading alone.
+      </p>
+      <p style="margin-top:10px;">
+        For the <strong>QSVM</strong>, repeating the feature map twice improved every
+        metric: <strong>{{ "%.1f"|format(results.qsvm_reupload.accuracy * 100) }}% accuracy</strong>
+        (vs {{ "%.1f"|format(results.qsvm.accuracy * 100) }}% baseline) and
+        {{ "%.2f"|format(results.qsvm_reupload.f1 * 100) }}% F1
+        (vs {{ "%.2f"|format(results.qsvm.f1 * 100) }}%). A deeper feature map gives the
+        kernel a richer notion of similarity between URLs.
+      </p>
+      <p style="margin-top:10px;">
+        For the <strong>QNN</strong>, the same technique did <em>not</em> help &mdash;
+        {{ "%.1f"|format(results.qnn_reupload.accuracy * 100) }}% accuracy vs
+        {{ "%.1f"|format(results.qnn.accuracy * 100) }}% baseline, though precision did
+        improve ({{ "%.2f"|format(results.qnn_reupload.precision * 100) }}% vs
+        {{ "%.2f"|format(results.qnn.precision * 100) }}%). With only 200 training
+        samples, the extra re-encoding adds circuit depth without adding new
+        information, and the baseline's single embedding was already sufficient for
+        its 54 trainable parameters to fit the data &mdash; a reminder that the same
+        technique doesn't transfer uniformly across model families.
+      </p>
+      {% elif results.qnn is defined %}
       <p>
         When constrained to the <strong>same 6 features and 200 training samples</strong>,
         both quantum models match the Classical SVM (Fair) baseline.
@@ -360,6 +474,20 @@
           instant, high-accuracy predictions.
         </p>
       </div>
+
+      {% if results.qsvm_reupload is defined or results.qnn_reupload is defined %}
+      <div class="how-card">
+        <div class="how-icon">5</div>
+        <h3>Data Re-uploading (v2)</h3>
+        <p>
+          Both quantum models above are re-tested with <strong>data re-uploading</strong>
+          (Perez-Salinas et al., 2020): the same 6 features are re-encoded deeper into the
+          circuit &mdash; twice through the QSVM's feature map, or once per QNN layer &mdash;
+          instead of only at the very start. Every other setting (qubits, data split,
+          parameter count) is held fixed, isolating exactly what re-uploading changes.
+        </p>
+      </div>
+      {% endif %}
 
     </div>
   </div>

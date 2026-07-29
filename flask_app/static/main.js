@@ -19,17 +19,34 @@ const quantumPanel  = document.getElementById('quantum-panel');
 const quantumGrid   = document.getElementById('quantum-grid');
 const selectedModel = document.getElementById('selected-model');
 const qsvmNote      = document.getElementById('qsvm-note');
+const confFlag      = document.getElementById('confidence-flag');
+
+const checkHealthBtn  = document.getElementById('check-health-btn');
+const compareAllBtn   = document.getElementById('compare-all-btn');
+const healthPanel     = document.getElementById('health-panel');
+const healthVerdict   = document.getElementById('health-verdict');
+const healthDetails   = document.getElementById('health-details');
+const healthWarnings  = document.getElementById('health-warnings');
+const consensusPanel  = document.getElementById('consensus-panel');
+const consensusSummary = document.getElementById('consensus-summary');
+const consensusTable  = document.getElementById('consensus-table');
+
+const LOW_CONFIDENCE_THRESHOLD = 25; // below this, flag as borderline
 
 const MODEL_LOADING = {
   classical: 'Fetching page · running Classical SVM (Fair)… (~10s)',
   qsvm:      'Fetching page · running quantum kernel… (~10s)',
   qnn:       'Fetching page · running variational circuit… (~10s)',
+  qsvm_v2:   'Fetching page · running quantum kernel (data re-uploading)… (~15s)',
+  qnn_v2:    'Fetching page · running variational circuit (data re-uploading)… (~10s)',
 };
 
 const MODEL_DOT_CLASS = {
   'Classical SVM': 'dot-classical',
   'QSVM':          'dot-qsvm',
   'QNN':           'dot-qnn',
+  'QSVM v2':       'dot-qsvm-v2',
+  'QNN v2':        'dot-qnn-v2',
 };
 
 // ── Bar chart animation ───────────────────────────────────────────────────────
@@ -59,6 +76,8 @@ document.querySelectorAll('.model-tab:not(.tab-disabled)').forEach(tab => {
     // Hide previous result when switching models
     panel.classList.add('hidden');
     errorMsg.classList.add('hidden');
+    healthPanel.classList.add('hidden');
+    consensusPanel.classList.add('hidden');
   });
 });
 
@@ -71,6 +90,8 @@ form.addEventListener('submit', async (e) => {
 
   panel.classList.add('hidden');
   errorMsg.classList.add('hidden');
+  healthPanel.classList.add('hidden');
+  consensusPanel.classList.add('hidden');
   loadingText.textContent = MODEL_LOADING[model] || MODEL_LOADING.classical;
   loading.classList.remove('hidden');
   btn.disabled = true;
@@ -119,6 +140,7 @@ function renderResult(data) {
   confLabel.textContent = data.confidence + '%';
   confWrap.classList.remove('hidden');
   setTimeout(() => { confFill.style.width = data.confidence + '%'; }, 60);
+  confFlag.classList.toggle('hidden', data.confidence >= LOW_CONFIDENCE_THRESHOLD);
 
   // URL feature breakdown
   grid.innerHTML = '';
@@ -163,4 +185,134 @@ function renderResult(data) {
 function showError(msg) {
   errorMsg.textContent = msg;
   errorMsg.classList.remove('hidden');
+}
+
+// ── Site Health check ─────────────────────────────────────────────────────────
+checkHealthBtn.addEventListener('click', async () => {
+  const url = urlInput.value.trim();
+  if (!url) { showError('Enter a URL first.'); return; }
+
+  errorMsg.classList.add('hidden');
+  panel.classList.add('hidden');
+  consensusPanel.classList.add('hidden');
+  healthPanel.classList.add('hidden');
+  loadingText.textContent = 'Checking DNS, HTTP response and SSL certificate…';
+  loading.classList.remove('hidden');
+  checkHealthBtn.disabled = true;
+
+  try {
+    const fd = new FormData();
+    fd.append('url', url);
+    const res  = await fetch('/site-health', { method: 'POST', body: fd });
+    const data = await res.json();
+    loading.classList.add('hidden');
+    checkHealthBtn.disabled = false;
+
+    if (!res.ok) { showError(data.error || 'Something went wrong.'); return; }
+    renderHealth(data);
+  } catch (err) {
+    loading.classList.add('hidden');
+    checkHealthBtn.disabled = false;
+    showError('Network error — is the Flask server running?');
+  }
+});
+
+function renderHealth(data) {
+  const verdictMap = {
+    live:        { cls: 'verdict-live',        text: '✓ LIVE — site responded' },
+    dead:        { cls: 'verdict-dead',        text: '✕ DEAD — domain does not resolve' },
+    unreachable: { cls: 'verdict-unreachable', text: '⚠ UNREACHABLE — DNS resolves but server did not respond' },
+  };
+  const v = verdictMap[data.verdict] || verdictMap.unreachable;
+  healthVerdict.className   = 'health-verdict ' + v.cls;
+  healthVerdict.textContent = v.text;
+
+  const rows = [];
+  if (data.resolved_ip)      rows.push(['Resolved IP', data.resolved_ip]);
+  if (data.http_status)      rows.push(['HTTP status', data.http_status]);
+  if (data.response_time_ms != null) rows.push(['Response time', data.response_time_ms + ' ms']);
+  if (data.redirect_chain && data.redirect_chain.length > 1) {
+    rows.push(['Redirect chain', data.redirect_chain.map(h => `${h.status} → ${h.url}`).join('<br>')]);
+  }
+  if (data.ssl && data.ssl.available) {
+    rows.push(['SSL issuer', data.ssl.issuer]);
+    rows.push(['SSL issued', `${data.ssl.issued_days_ago} day(s) ago (valid until ${data.ssl.valid_until})`]);
+    rows.push(['SSL verified', data.ssl.verified ? 'Yes' : 'No — untrusted/self-signed']);
+  }
+  if (data.message) rows.push(['Note', data.message]);
+
+  healthDetails.innerHTML = rows.map(([label, val]) => `
+    <div class="health-row">
+      <span class="health-label">${label}</span>
+      <span class="health-value">${val}</span>
+    </div>
+  `).join('');
+
+  if (data.warnings && data.warnings.length) {
+    healthWarnings.innerHTML = data.warnings.map(w => `<div class="health-warning">&#9888; ${w}</div>`).join('');
+  } else {
+    healthWarnings.innerHTML = '';
+  }
+
+  healthPanel.classList.remove('hidden');
+  healthPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ── Model Consensus (all 5 models on one fetch) ─────────────────────────────────
+compareAllBtn.addEventListener('click', async () => {
+  const url = urlInput.value.trim();
+  if (!url) { showError('Enter a URL first.'); return; }
+
+  errorMsg.classList.add('hidden');
+  panel.classList.add('hidden');
+  healthPanel.classList.add('hidden');
+  consensusPanel.classList.add('hidden');
+  loadingText.textContent = 'Fetching page once, running all 5 models…';
+  loading.classList.remove('hidden');
+  compareAllBtn.disabled = true;
+
+  try {
+    const fd = new FormData();
+    fd.append('url', url);
+    const res  = await fetch('/analyse-all', { method: 'POST', body: fd });
+    const data = await res.json();
+    loading.classList.add('hidden');
+    compareAllBtn.disabled = false;
+
+    if (!res.ok) { showError(data.error || 'Something went wrong.'); return; }
+    renderConsensus(data);
+  } catch (err) {
+    loading.classList.add('hidden');
+    compareAllBtn.disabled = false;
+    showError('Network error — is the Flask server running?');
+  }
+});
+
+function renderConsensus(data) {
+  const total = data.models.length;
+  const agree = total - data.dissenters.length;
+  consensusSummary.textContent = data.unanimous
+    ? `${total}/${total} models agree: ${data.majority_label.toUpperCase()}`
+    : `${agree}/${total} agree: ${data.majority_label.toUpperCase()} — ${data.dissenters.join(', ')} disagree`;
+  consensusSummary.className = 'consensus-summary ' + (data.unanimous ? 'consensus-agree' : 'consensus-split');
+
+  consensusTable.innerHTML = data.models.map(m => {
+    const isDissenter = data.dissenters.includes(m.model_used);
+    const isPhishing  = m.label === 'phishing';
+    const lowConf     = m.confidence < LOW_CONFIDENCE_THRESHOLD;
+    const dotClass    = MODEL_DOT_CLASS[m.model_used] || 'dot-classical';
+    return `
+      <div class="consensus-row ${isDissenter ? 'row-dissent' : ''}">
+        <span class="model-badge-dot ${dotClass}"></span>
+        <span class="consensus-model">${m.model_used}</span>
+        <span class="consensus-label ${isPhishing ? 'label-phishing' : 'label-legit'}">
+          ${isPhishing ? 'PHISHING' : 'LEGITIMATE'}
+        </span>
+        <span class="consensus-confidence">${m.confidence}%${lowConf ? ' <span class="low-conf-tag">borderline</span>' : ''}</span>
+      </div>
+    `;
+  }).join('');
+
+  consensusPanel.classList.remove('hidden');
+  consensusPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
