@@ -33,6 +33,20 @@ const consensusTable  = document.getElementById('consensus-table');
 const siteWarning     = document.getElementById('site-warning');
 const consensusSiteWarning = document.getElementById('consensus-site-warning');
 
+const feedbackForm       = document.getElementById('feedback-form');
+const feedbackStars      = document.querySelectorAll('#star-rating .star');
+const feedbackRatingInput = document.getElementById('feedback-rating');
+const feedbackNameInput  = document.getElementById('feedback-name');
+const feedbackCommentInput = document.getElementById('feedback-comment');
+const feedbackError      = document.getElementById('feedback-error');
+const feedbackList       = document.getElementById('feedback-list');
+const feedbackSummary    = document.getElementById('feedback-summary');
+const feedbackSubmitBtn  = document.getElementById('feedback-submit-btn');
+
+const usageCounter      = document.getElementById('usage-counter');
+const adviceBox          = document.getElementById('advice-box');
+const consensusAdviceBox = document.getElementById('consensus-advice-box');
+
 const LOW_CONFIDENCE_THRESHOLD = 25; // below this, flag as borderline
 
 const MODEL_LOADING = {
@@ -66,7 +80,31 @@ document.addEventListener('DOMContentLoaded', () => {
       urlInput.focus();
     });
   });
+
+  loadFeedback();
+  loadUsage();
 });
+
+// ── Usage counter & advice ───────────────────────────────────────────────────
+async function loadUsage() {
+  try {
+    const res  = await fetch('/usage');
+    const data = await res.json();
+    usageCounter.textContent = `${data.total.toLocaleString()} analyses run so far`;
+  } catch (err) {
+    usageCounter.textContent = '';
+  }
+}
+
+function renderAdvice(container, advice) {
+  if (!advice) {
+    container.className = 'advice-box hidden';
+    container.textContent = '';
+    return;
+  }
+  container.textContent = advice.message;
+  container.className = 'advice-box advice-' + advice.level;
+}
 
 // ── Model tab switching ───────────────────────────────────────────────────────
 document.querySelectorAll('.model-tab:not(.tab-disabled)').forEach(tab => {
@@ -123,7 +161,7 @@ form.addEventListener('submit', async (e) => {
 // ── Site status warning (dead/unreachable URL detected during analysis) ────────
 function applySiteStatus(el, siteStatus) {
   if (siteStatus && siteStatus.verdict !== 'live') {
-    const icon = siteStatus.verdict === 'dead' ? '✕' : '⚠';
+    const icon = (siteStatus.verdict === 'dead' || siteStatus.verdict === 'blocked') ? '✕' : '⚠';
     el.textContent = `${icon} ${siteStatus.message}`;
     el.className = 'site-warning site-warning-' + siteStatus.verdict;
   } else {
@@ -156,6 +194,8 @@ function renderResult(data) {
   confWrap.classList.remove('hidden');
   setTimeout(() => { confFill.style.width = data.confidence + '%'; }, 60);
   confFlag.classList.toggle('hidden', data.confidence >= LOW_CONFIDENCE_THRESHOLD);
+
+  renderAdvice(adviceBox, data.advice);
 
   // URL feature breakdown
   grid.innerHTML = '';
@@ -195,6 +235,7 @@ function renderResult(data) {
 
   panel.classList.remove('hidden');
   panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  loadUsage();
 }
 
 function showError(msg) {
@@ -237,6 +278,7 @@ function renderHealth(data) {
     live:        { cls: 'verdict-live',        text: '✓ LIVE — site responded' },
     dead:        { cls: 'verdict-dead',        text: '✕ DEAD — domain does not resolve' },
     unreachable: { cls: 'verdict-unreachable', text: '⚠ UNREACHABLE — DNS resolves but server did not respond' },
+    blocked:     { cls: 'verdict-dead',        text: '✕ BLOCKED — URL points at a non-public address' },
   };
   const v = verdictMap[data.verdict] || verdictMap.unreachable;
   healthVerdict.className   = 'health-verdict ' + v.cls;
@@ -312,6 +354,8 @@ function renderConsensus(data) {
     : `${agree}/${total} agree: ${data.majority_label.toUpperCase()} — ${data.dissenters.join(', ')} disagree`;
   consensusSummary.className = 'consensus-summary ' + (data.unanimous ? 'consensus-agree' : 'consensus-split');
 
+  renderAdvice(consensusAdviceBox, data.advice);
+
   consensusTable.innerHTML = data.models.map(m => {
     const isDissenter = data.dissenters.includes(m.model_used);
     const isPhishing  = m.label === 'phishing';
@@ -331,4 +375,109 @@ function renderConsensus(data) {
 
   consensusPanel.classList.remove('hidden');
   consensusPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  loadUsage();
 }
+
+// ── Feedback ─────────────────────────────────────────────────────────────────
+feedbackStars.forEach(star => {
+  star.addEventListener('click', () => {
+    const value = parseInt(star.dataset.value, 10);
+    feedbackRatingInput.value = value;
+    feedbackStars.forEach(s => {
+      s.classList.toggle('filled', parseInt(s.dataset.value, 10) <= value);
+    });
+  });
+});
+
+async function loadFeedback() {
+  try {
+    const res  = await fetch('/feedback');
+    const data = await res.json();
+    renderFeedback(data);
+  } catch (err) {
+    feedbackSummary.textContent = 'Could not load feedback.';
+  }
+}
+
+function renderFeedback(data) {
+  feedbackSummary.textContent = data.count
+    ? `${data.average} / 5 average from ${data.count} review${data.count === 1 ? '' : 's'}`
+    : 'Be the first to leave a rating.';
+
+  feedbackList.innerHTML = '';
+
+  if (!data.items.length) {
+    const empty = document.createElement('p');
+    empty.className = 'feedback-empty';
+    empty.textContent = 'No feedback yet.';
+    feedbackList.appendChild(empty);
+    return;
+  }
+
+  for (const item of data.items) {
+    const el = document.createElement('div');
+    el.className = 'feedback-item';
+
+    const header = document.createElement('div');
+    header.className = 'feedback-item-header';
+
+    const name = document.createElement('span');
+    name.className = 'feedback-item-name';
+    name.textContent = item.name; // .textContent, not innerHTML — untrusted visitor text
+
+    const date = document.createElement('span');
+    date.className = 'feedback-item-date';
+    date.textContent = item.created_at;
+
+    header.appendChild(name);
+    header.appendChild(date);
+
+    const stars = document.createElement('div');
+    stars.className = 'feedback-item-stars';
+    stars.textContent = '★'.repeat(item.rating) + '☆'.repeat(5 - item.rating);
+
+    const comment = document.createElement('p');
+    comment.className = 'feedback-item-comment';
+    comment.textContent = item.comment; // .textContent, not innerHTML — untrusted visitor text
+
+    el.appendChild(header);
+    el.appendChild(stars);
+    el.appendChild(comment);
+    feedbackList.appendChild(el);
+  }
+}
+
+feedbackForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  feedbackError.classList.add('hidden');
+
+  if (parseInt(feedbackRatingInput.value, 10) < 1) {
+    feedbackError.textContent = 'Please select a star rating.';
+    feedbackError.classList.remove('hidden');
+    return;
+  }
+
+  feedbackSubmitBtn.disabled = true;
+
+  try {
+    const fd  = new FormData(feedbackForm);
+    const res  = await fetch('/feedback', { method: 'POST', body: fd });
+    const data = await res.json();
+    feedbackSubmitBtn.disabled = false;
+
+    if (!res.ok) {
+      feedbackError.textContent = data.error || 'Something went wrong.';
+      feedbackError.classList.remove('hidden');
+      return;
+    }
+
+    feedbackForm.reset();
+    feedbackRatingInput.value = 0;
+    feedbackStars.forEach(s => s.classList.remove('filled'));
+    loadFeedback();
+  } catch (err) {
+    feedbackSubmitBtn.disabled = false;
+    feedbackError.textContent = 'Network error — is the Flask server running?';
+    feedbackError.classList.remove('hidden');
+  }
+});

@@ -4,6 +4,7 @@ import json
 import time
 import ssl
 import socket
+import sqlite3
 import joblib
 import numpy as np
 import pandas as pd
@@ -549,6 +550,95 @@ def build_site_status(dns_ok, site_reachable):
     return {'verdict': 'live', 'message': None}
 
 
+BORDERLINE_CONFIDENCE = 25  # mirrors LOW_CONFIDENCE_THRESHOLD in static/main.js — keep in sync
+
+
+def build_advice(label, confidence, site_status):
+    """Plain-language recommendation shown under the confidence bar."""
+    if site_status.get('verdict') != 'live':
+        return {'level': 'caution', 'message': "This prediction is based on incomplete "
+                "information because the site could not be fully reached. Don't rely on it "
+                "alone — verify the URL independently before deciding whether to open it."}
+    if label == 'phishing':
+        if confidence >= BORDERLINE_CONFIDENCE:
+            return {'level': 'danger', 'message': "Do not open this link or enter any personal "
+                    "information. The model is confident this site shows signs of phishing."}
+        return {'level': 'caution', 'message': "This site shows some signs of phishing, but the "
+                "model isn't very confident. Avoid entering personal information and verify the "
+                "URL before proceeding."}
+    if confidence >= BORDERLINE_CONFIDENCE:
+        return {'level': 'safe', 'message': "This site appears safe to open based on the "
+                "analysis. As always, stay alert for anything unusual once you're on the page."}
+    return {'level': 'caution', 'message': "This site looks likely safe, but the model isn't "
+            "very confident. Use normal caution, especially before entering sensitive "
+            "information."}
+
+
+def build_consensus_advice(majority_label, unanimous, site_status):
+    """Plain-language recommendation for the Compare-All-Models consensus."""
+    if site_status.get('verdict') != 'live':
+        return {'level': 'caution', 'message': "This prediction is based on incomplete "
+                "information because the site could not be fully reached. Don't rely on it "
+                "alone — verify the URL independently before deciding whether to open it."}
+    if not unanimous:
+        return {'level': 'caution', 'message': "The models disagree on this one. Treat it with "
+                "caution — verify the URL manually before opening it or entering any "
+                "information."}
+    if majority_label == 'phishing':
+        return {'level': 'danger', 'message': "Do not open this link or enter any personal "
+                "information. All models agree this site shows signs of phishing."}
+    return {'level': 'safe', 'message': "This site appears safe to open — all models agree. As "
+            "always, stay alert for anything unusual once you're on the page."}
+
+
+# ── Feedback & Usage (SQLite) ────────────────────────────────────────────────
+# NOTE: Render's free tier has an ephemeral filesystem — this file resets on
+# every redeploy/restart there, so feedback/usage data does not persist
+# across deploys in production. It persists normally in local dev and for
+# the lifetime of a single running instance.
+FEEDBACK_DB = os.path.join(os.path.dirname(__file__), 'feedback.db')
+
+
+def _get_db():
+    # Fresh connection per call (not a shared module-level connection) —
+    # cheap with sqlite3, and avoids check_same_thread/threading complications
+    # if gunicorn's worker/thread count ever changes.
+    conn = sqlite3.connect(FEEDBACK_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_db():
+    with _get_db() as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                rating INTEGER NOT NULL,
+                comment TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        ''')
+
+
+_init_db()
+
+
+def record_usage(action):
+    with _get_db() as conn:
+        conn.execute(
+            'INSERT INTO usage_events (action, created_at) VALUES (?, ?)',
+            (action, datetime.now(timezone.utc).isoformat()),
+        )
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/')
 def index():
@@ -574,6 +664,7 @@ def analyse():
 
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
+    record_usage('analyse')
     if model not in PREDICTORS:
         model = 'classical'
 
@@ -589,6 +680,7 @@ def analyse():
         model = 'classical'
         pred = predict_classical(content_vals)
 
+    site_status = build_site_status(dns_ok, site_reachable)
     response = {
         'label':           pred['label'],
         'confidence':      pred['confidence'],
@@ -598,7 +690,8 @@ def analyse():
         'key_features':    kf,
         'estimated_count': len(content_estimated),
         'estimated_list':  sorted(content_estimated),
-        'site_status':     build_site_status(dns_ok, site_reachable),
+        'site_status':     site_status,
+        'advice':          build_advice(pred['label'], pred['confidence'], site_status),
     }
     if model in _MODELS_WITH_QUANTUM_PANEL:
         response['quantum_features'] = build_quantum_features(content_vals, content_estimated)
@@ -611,6 +704,7 @@ def analyse_all():
     url = request.form.get('url', '').strip()
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
+    record_usage('analyse_all')
 
     features, base_estimated = extract_features(url)
     kf = build_key_features(features)
@@ -632,6 +726,8 @@ def analyse_all():
     majority       = 'phishing' if phishing_votes > legit_votes else 'legitimate'
     dissenters     = [r['model_used'] for r in model_results if r['label'] != majority]
 
+    site_status = build_site_status(dns_ok, site_reachable)
+    unanimous   = len(dissenters) == 0
     return jsonify({
         'key_features':      kf,
         'quantum_features':  build_quantum_features(content_vals, content_estimated),
@@ -641,9 +737,57 @@ def analyse_all():
         'majority_label':    majority,
         'vote_counts':       {'phishing': phishing_votes, 'legitimate': legit_votes},
         'dissenters':        dissenters,
-        'unanimous':         len(dissenters) == 0,
-        'site_status':       build_site_status(dns_ok, site_reachable),
+        'unanimous':         unanimous,
+        'site_status':       site_status,
+        'advice':            build_consensus_advice(majority, unanimous, site_status),
     })
+
+
+@app.route('/usage', methods=['GET'])
+def get_usage():
+    with _get_db() as conn:
+        total = conn.execute('SELECT COUNT(*) AS n FROM usage_events').fetchone()['n']
+    return jsonify({'total': total})
+
+
+@app.route('/feedback', methods=['GET'])
+def get_feedback():
+    with _get_db() as conn:
+        stats = conn.execute('SELECT COUNT(*) AS n, AVG(rating) AS avg FROM feedback').fetchone()
+        rows = conn.execute(
+            'SELECT name, rating, comment, created_at FROM feedback ORDER BY id DESC LIMIT 50'
+        ).fetchall()
+    return jsonify({
+        'count':   stats['n'],
+        'average': round(stats['avg'], 1) if stats['avg'] is not None else None,
+        'items':   [dict(r) for r in rows],
+    })
+
+
+@app.route('/feedback', methods=['POST'])
+def post_feedback():
+    name       = request.form.get('name', '').strip()[:80] or 'Anonymous'
+    comment    = request.form.get('comment', '').strip()
+    rating_raw = request.form.get('rating', '')
+
+    if not comment:
+        return jsonify({'error': 'Please enter a comment.'}), 400
+    if len(comment) > 1000:
+        return jsonify({'error': 'Comment must be 1000 characters or fewer.'}), 400
+    try:
+        rating = int(rating_raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Please select a star rating.'}), 400
+    if rating < 1 or rating > 5:
+        return jsonify({'error': 'Rating must be between 1 and 5.'}), 400
+
+    with _get_db() as conn:
+        conn.execute(
+            'INSERT INTO feedback (name, rating, comment, created_at) VALUES (?, ?, ?, ?)',
+            (name, rating, comment, datetime.now(timezone.utc).isoformat()),
+        )
+
+    return jsonify({'message': 'Thanks for your feedback!'})
 
 
 if __name__ == '__main__':

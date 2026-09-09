@@ -38,6 +38,7 @@
         <a href="#analyser">Analyser</a>
         <a href="#comparison">Model Comparison</a>
         <a href="#how-it-works">How It Works</a>
+        <a href="#feedback">Feedback</a>
       </nav>
     </div>
   </div>
@@ -50,6 +51,7 @@
     <p class="hero-caption">
       Powered by Classical SVM &mdash; 95.41% accuracy on 11,430 URLs
     </p>
+    <p class="usage-counter" id="usage-counter"></p>
 
     <!-- Model selector -->
     <div class="model-selector">
@@ -127,6 +129,7 @@
         <span id="consensus-summary" class="consensus-summary"></span>
       </div>
       <div id="consensus-table" class="consensus-table"></div>
+      <div id="consensus-advice-box" class="advice-box hidden"></div>
     </div>
 
     <!-- Result panel (hidden until analysis runs) -->
@@ -155,6 +158,8 @@
           &#9888; Borderline confidence &mdash; recommend manual review
         </div>
       </div>
+
+      <div id="advice-box" class="advice-box hidden"></div>
 
       <div class="features-grid" id="features-grid"></div>
 
@@ -493,6 +498,43 @@
       {% endif %}
 
     </div>
+  </div>
+</section>
+
+<!-- ── Feedback ──────────────────────────────────────────────────────────────── -->
+<section id="feedback" class="section-alt">
+  <div class="container">
+    <h2>Feedback</h2>
+    <p class="section-caption" id="feedback-summary">Be the first to leave a rating.</p>
+
+    <form id="feedback-form" class="feedback-form" autocomplete="off">
+      <div class="star-rating" id="star-rating">
+        <button type="button" class="star" data-value="1" aria-label="1 star">&#9733;</button>
+        <button type="button" class="star" data-value="2" aria-label="2 stars">&#9733;</button>
+        <button type="button" class="star" data-value="3" aria-label="3 stars">&#9733;</button>
+        <button type="button" class="star" data-value="4" aria-label="4 stars">&#9733;</button>
+        <button type="button" class="star" data-value="5" aria-label="5 stars">&#9733;</button>
+        <input type="hidden" id="feedback-rating" name="rating" value="0">
+      </div>
+      <input
+        type="text"
+        id="feedback-name"
+        name="name"
+        placeholder="Name (optional)"
+        maxlength="80"
+      />
+      <textarea
+        id="feedback-comment"
+        name="comment"
+        placeholder="What did you think?"
+        maxlength="1000"
+        required
+      ></textarea>
+      <button type="submit" id="feedback-submit-btn">Submit Feedback</button>
+      <div id="feedback-error" class="error-msg hidden"></div>
+    </form>
+
+    <div id="feedback-list" class="feedback-list"></div>
   </div>
 </section>
 

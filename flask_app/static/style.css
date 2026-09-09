@@ -69,7 +69,8 @@ nav a:hover { color: var(--text); text-decoration: none; }
 }
 
 .hero h2 { font-size: 2rem; }
-.hero-caption { color: var(--muted); margin-top: 6px; margin-bottom: 32px; }
+.hero-caption { color: var(--muted); margin-top: 6px; margin-bottom: 6px; }
+.usage-counter { color: var(--muted); font-size: 0.85rem; margin-bottom: 32px; }
 
 .input-row {
   display: flex;
@@ -635,6 +636,33 @@ footer {
   padding: 6px 10px;
 }
 
+/* ── Post-analysis advice ─────────────────────────────────────────────────── */
+.advice-box {
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  padding: 12px 16px;
+  margin: 16px 0;
+  line-height: 1.5;
+}
+
+.advice-danger {
+  background: rgba(248, 81, 73, 0.15);
+  border: 1px solid var(--red);
+  color: var(--red);
+}
+
+.advice-caution {
+  background: rgba(210, 153, 34, 0.15);
+  border: 1px solid var(--improved);
+  color: var(--improved);
+}
+
+.advice-safe {
+  background: rgba(63, 185, 80, 0.15);
+  border: 1px solid var(--green);
+  color: var(--green);
+}
+
 /* ── Action row (Site Health / Compare All buttons) ──────────────────────── */
 .action-row {
   display: flex;
@@ -799,6 +827,103 @@ footer {
   border-radius: 50%;
   animation: spin 1.4s linear infinite;
 }
+
+/* ── Feedback ─────────────────────────────────────────────────────────────── */
+.feedback-form {
+  max-width: 560px;
+  margin: 0 auto 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.star-rating {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+
+.star-rating .star {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.8rem;
+  line-height: 1;
+  color: var(--border);
+  padding: 2px;
+  transition: color .15s;
+}
+
+.star-rating .star:hover,
+.star-rating .star.filled { color: var(--improved); }
+
+.feedback-form input[type="text"],
+.feedback-form textarea {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 12px 14px;
+  outline: none;
+  resize: vertical;
+}
+
+.feedback-form input[type="text"]:focus,
+.feedback-form textarea:focus { border-color: var(--quantum); }
+
+.feedback-form textarea { min-height: 80px; }
+
+.feedback-form button[type="submit"] {
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  color: #000;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 12px 20px;
+  transition: opacity .2s;
+}
+
+.feedback-form button[type="submit"]:hover { opacity: 0.85; }
+.feedback-form button[type="submit"]:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.feedback-list {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.feedback-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+}
+
+.feedback-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.feedback-item-name { font-weight: 600; }
+.feedback-item-date { font-size: 0.75rem; color: var(--muted); flex-shrink: 0; }
+.feedback-item-stars { color: var(--improved); letter-spacing: 1px; margin-bottom: 4px; }
+.feedback-item-comment {
+  font-size: 0.88rem;
+  color: var(--text);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.feedback-empty { color: var(--muted); text-align: center; font-size: 0.88rem; }
 
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
