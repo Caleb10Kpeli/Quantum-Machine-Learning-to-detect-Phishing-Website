@@ -553,25 +553,40 @@ def build_site_status(dns_ok, site_reachable):
 BORDERLINE_CONFIDENCE = 25  # mirrors LOW_CONFIDENCE_THRESHOLD in static/main.js — keep in sync
 
 
+SINGLE_MODEL_NOTE = (" This result comes from a single model — for a more complete "
+                      "picture, it's worth checking how the other models score this URL "
+                      "using \"Compare All 5 Models.\"")
+
+
 def build_advice(label, confidence, site_status):
-    """Plain-language recommendation shown under the confidence bar."""
+    """Plain-language recommendation shown under the confidence bar.
+
+    Unlike build_consensus_advice, this always appends SINGLE_MODEL_NOTE,
+    since a single-model result hasn't been cross-checked against the other
+    four models the way the Compare-All-Models view has.
+    """
     if site_status.get('verdict') != 'live':
-        return {'level': 'caution', 'message': "This prediction is based on incomplete "
-                "information because the site could not be fully reached. Don't rely on it "
-                "alone — verify the URL independently before deciding whether to open it."}
-    if label == 'phishing':
+        advice = {'level': 'caution', 'message': "This prediction is based on incomplete "
+                  "information because the site could not be fully reached. Don't rely on it "
+                  "alone — verify the URL independently before deciding whether to open it."}
+    elif label == 'phishing':
         if confidence >= BORDERLINE_CONFIDENCE:
-            return {'level': 'danger', 'message': "Do not open this link or enter any personal "
-                    "information. The model is confident this site shows signs of phishing."}
-        return {'level': 'caution', 'message': "This site shows some signs of phishing, but the "
-                "model isn't very confident. Avoid entering personal information and verify the "
-                "URL before proceeding."}
-    if confidence >= BORDERLINE_CONFIDENCE:
-        return {'level': 'safe', 'message': "This site appears safe to open based on the "
-                "analysis. As always, stay alert for anything unusual once you're on the page."}
-    return {'level': 'caution', 'message': "This site looks likely safe, but the model isn't "
-            "very confident. Use normal caution, especially before entering sensitive "
-            "information."}
+            advice = {'level': 'danger', 'message': "Do not open this link or enter any personal "
+                      "information. The model is confident this site shows signs of phishing."}
+        else:
+            advice = {'level': 'caution', 'message': "This site shows some signs of phishing, but "
+                      "the model isn't very confident. Avoid entering personal information and "
+                      "verify the URL before proceeding."}
+    elif confidence >= BORDERLINE_CONFIDENCE:
+        advice = {'level': 'safe', 'message': "This site appears safe to open based on the "
+                  "analysis. As always, stay alert for anything unusual once you're on the page."}
+    else:
+        advice = {'level': 'caution', 'message': "This site looks likely safe, but the model "
+                  "isn't very confident. Use normal caution, especially before entering "
+                  "sensitive information."}
+
+    advice['message'] += SINGLE_MODEL_NOTE
+    return advice
 
 
 def build_consensus_advice(majority_label, unanimous, site_status):
