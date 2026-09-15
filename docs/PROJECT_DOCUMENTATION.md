@@ -147,6 +147,7 @@ LIST OF TABLES
 3.10 System Development Tools / Programs
 3.11 Deployment
 3.12 Feedback, Usage Tracking, and Post-Analysis Advice
+3.13 Bulk URL Checker and SSRF Protection
 
 **CHAPTER FOUR — RESULTS**
 4.0 Introduction
@@ -159,6 +160,7 @@ LIST OF TABLES
 4.7 Model Performance Results
 4.8 Live Case Study Verification
 4.9 User Feedback, Usage Counter, and Post-Analysis Advice
+4.10 Bulk URL Checker
 
 **CHAPTER FIVE — CONCLUSION AND RECOMMENDATIONS**
 5.0 Conclusion
@@ -634,10 +636,12 @@ flowchart LR
     User --> UC7[Leave feedback / rating]
     User --> UC8[View usage counter]
     User --> UC9[Receive post-analysis advice]
+    User --> UC10[Bulk-check up to 50 URLs\npaste or CSV/TXT upload]
 
     UC1 --> UC3
     UC2 --> UC3
     UC1 --> UC9
+    UC10 --> UC3
 ```
 
 **Figure 3.3** Use case diagram of the QML phishing detector.
@@ -663,6 +667,9 @@ flowchart LR
   been run on the deployed instance.
 - **Receive Advice:** After any prediction (single-model or consensus),
   see a plain-language recommendation on whether to open the URL.
+- **Bulk-check URLs:** Paste up to 50 URLs, or upload a `.csv`/`.txt` file
+  of URLs, and receive a verdict/confidence table for all of them from a
+  single submission, downloadable as a CSV report.
 
 Unlike the author's earlier diploma project, this system has no
 authentication, account approval, or admin moderation layer — every
@@ -836,6 +843,26 @@ shall be able to perform:
   empty comment, and cap comment length to prevent abuse.
 - The system shall display submitted feedback back to visitors as inert
   text only, never as executable markup.
+
+**Bulk URL Checking:**
+- The system shall accept up to 50 URLs per submission, either pasted
+  (one per line) or uploaded as a `.csv` (URL in the first column) or
+  `.txt` (one per line) file.
+- The system shall de-duplicate submitted URLs before scanning, and cap
+  any upload at 2MB.
+- The system shall scan each URL independently with the Classical (Fair)
+  SVM and report a verdict, confidence score, and timestamp per URL,
+  without letting one failed URL abort the batch.
+- The system shall let the user download the bulk result set as a CSV
+  file.
+
+**SSRF Protection:**
+- The system shall resolve every submitted URL's hostname and reject
+  requests to private, loopback, link-local, reserved, or multicast IP
+  addresses (including the cloud metadata endpoint) before connecting.
+- The system shall re-validate and pin every redirect hop to its checked
+  IP, rather than trusting the HTTP client's built-in redirect handling,
+  to close DNS-rebinding and redirect-to-internal attack paths.
 
 ### 3.9 NON-FUNCTIONAL REQUIREMENTS
 
@@ -1022,6 +1049,53 @@ redeploy or extended idle restart. This is disclosed rather than hidden,
 and is an acceptable trade-off for a student project with no dedicated
 hosting budget; §5.1 discusses migrating to persistent storage as a
 recommended follow-up.
+
+### 3.13 BULK URL CHECKER AND SSRF PROTECTION
+
+Following a supervisor-provided issue list (`ISSUES TO SOLVE qml.pdf`)
+naming bulk URL checking, downloadable reports, shortened-link analysis,
+lookalike detection, explainable results, and scheduled monitoring as the
+priority features to build next, this iteration implements the first two
+of those six end-to-end and lays SSRF-safe groundwork the others depend on.
+The full backlog and its build status are tracked in `docs/ROADMAP.md`.
+
+**Bulk URL checker.** A new `/bulk` page accepts either a pasted list (one
+URL per line, `<textarea name="urls">`) or an uploaded `.csv`/`.txt` file.
+`_parse_bulk_urls` merges both sources, strips a `url`/`urls` CSV header
+row if present, de-duplicates while preserving order, and caps the result
+at `MAX_BULK_URLS` (50) — matching the cap advertised in the UI. Each URL
+is then scanned independently by `_bulk_analyse_one`, which reuses the same
+`fetch_content_features` / `predict_classical` pipeline as the single-URL
+analyser, so bulk verdicts are computed identically to individual ones
+rather than by a separate, potentially-diverging code path. A per-URL
+`try/except` means one malformed or unreachable entry produces an error
+row rather than aborting the whole batch — important for a feature whose
+entire purpose is tolerating a mixed list of good and bad input. Results
+render in a table (URL, verdict, confidence, timestamp) and can be
+downloaded as a CSV via `POST /bulk-download`, which the client triggers
+by POSTing the already-rendered result set back to the server rather than
+re-scanning — the report is downloadable without re-querying every target
+site a second time.
+
+**SSRF protection.** Because the application is publicly deployed, every
+route that fetches a user-submitted URL — the single analyser, Site
+Health check, and now the bulk checker — is a potential Server-Side
+Request Forgery (SSRF) vector: without validation, a visitor could submit
+`http://169.254.169.254/` (the cloud metadata endpoint) or an internal
+`10.x`/`192.168.x` address and have the server make that request on their
+behalf. `flask_app/ssrf_guard.py` closes this by classifying the
+*resolved IP*, never the hostname string (so numeric/hex-encoded loopback
+forms cannot slip through), rejecting private, loopback, link-local,
+reserved, and multicast addresses, and — critically — re-validating and
+pinning every redirect hop to the IP that was checked, rather than
+trusting `requests`' built-in redirect following (which re-resolves DNS
+with no seam to re-check, and would otherwise follow a redirect straight
+to an internal address). `safe_get` replaces every `requests.get(...,
+allow_redirects=True)` call in `app.py`, and `get_ssl_info` resolves and
+validates a hostname before opening a raw socket to it. This same
+redirect-hop validation and history is what a future "shortened URL
+expander" / "redirect-chain viewer" (see `docs/ROADMAP.md`) would build
+its UI on top of — the safe-fetching groundwork is already in place.
 
 ---
 
@@ -1227,6 +1301,27 @@ whenever the target site could not be fully reached, regardless of the
 underlying label, so an unreliable prediction is never presented as
 confidently safe or confidently dangerous.
 
+### 4.10 BULK URL CHECKER
+
+The Bulk URL Checker page (`/bulk`) lets a visitor paste a list of URLs or
+upload a `.csv`/`.txt` file and receive a verdict/confidence table for all
+of them from one submission, instead of running the single-URL analyser
+repeatedly. Each row shows the URL, verdict badge (phishing/legitimate/
+error), confidence percentage, and scan timestamp; an error badge is shown
+per-row rather than failing the whole batch when an individual URL cannot
+be scanned. A "Download CSV" button exports the rendered result set as a
+`phishing_analysis.csv` report.
+
+**[INSERT SCREENSHOT: Figure 4.10 — Bulk URL Checker page, showing a
+result table with at least one phishing verdict, one legitimate verdict,
+and one error row if possible]**
+
+This feature, along with the CSV download and the SSRF-safe redirect
+handling in `flask_app/ssrf_guard.py` it shares with the single-URL
+analyser and Site Health check, was implemented directly from a
+supervisor-provided prioritised issue list (§3.13); the remaining items on
+that list are tracked as future work in `docs/ROADMAP.md` and §5.2.
+
 ---
 
 # CHAPTER FIVE
@@ -1308,6 +1403,13 @@ There is significant potential for future enhancement of this project:
   browser extension, so a user is warned before navigating to a
   suspected phishing page rather than needing to paste the URL into a
   separate site.
+- **Remaining supervisor-prioritised features:** Lookalike domain
+  detection, an explainable per-URL risk report, and scheduled URL
+  monitoring — three of the six "build first" items from the
+  supervisor's issue list (§3.13) — were not yet implemented in this
+  iteration. The full backlog, including lower-priority items (URL
+  watchlists, a redirect-chain viewer UI, QR-code checking, a public API,
+  and others), is tracked in `docs/ROADMAP.md`.
 
 ---
 

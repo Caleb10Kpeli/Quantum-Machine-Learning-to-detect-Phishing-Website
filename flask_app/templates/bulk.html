@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bulk URL Checker — QML Phishing Detector</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #f4f7fb; color: #1e293b; }
+    .navbar { background: #0d1b4b; padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
+    .navbar a { color: #94a3b8; text-decoration: none; font-size: 0.9rem; }
+    .navbar a:hover { color: #fff; }
+    .navbar span { color: #fff; font-weight: 700; font-size: 1.1rem; }
+    .container { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.6rem; color: #0d1b4b; margin-bottom: 0.4rem; }
+    .subtitle { color: #64748b; margin-bottom: 1.5rem; font-size: 0.95rem; }
+    .card { background: #fff; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    textarea { width: 100%; height: 140px; padding: 0.75rem; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; resize: vertical; font-family: monospace; }
+    .or-divider { text-align: center; color: #94a3b8; margin: 1rem 0; font-size: 0.85rem; }
+    input[type="file"] { border: 1px dashed #cbd5e1; border-radius: 8px; padding: 0.75rem; width: 100%; font-size: 0.9rem; }
+    .btn { background: #0a7e6e; color: #fff; border: none; padding: 0.75rem 2rem; border-radius: 8px; font-size: 1rem; cursor: pointer; margin-top: 1rem; }
+    .btn:hover { background: #085f53; }
+    .btn-csv { background: #1d4ed8; color: #fff; border: none; padding: 0.6rem 1.5rem; border-radius: 8px; font-size: 0.9rem; cursor: pointer; float: right; }
+    .btn-csv:hover { background: #1e40af; }
+    .error-box { background: #fef2f2; border: 1px solid #fca5a5; color: #b91c1c; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    .results-header { display: flex; align-items: center; margin-bottom: 1rem; }
+    .results-header h2 { font-size: 1.2rem; color: #0d1b4b; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th { background: #0d1b4b; color: #fff; padding: 0.75rem 1rem; text-align: left; }
+    td { padding: 0.7rem 1rem; border-bottom: 1px solid #e2e8f0; }
+    tr:last-child td { border-bottom: none; }
+    tr:nth-child(even) { background: #f8fafc; }
+    .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600; }
+    .badge.phishing { background: #fef2f2; color: #dc2626; }
+    .badge.legitimate { background: #f0fdf4; color: #16a34a; }
+    .badge.error { background: #fff7ed; color: #ea580c; }
+    .note { font-size: 0.82rem; color: #94a3b8; margin-top: 0.5rem; }
+    a.back { color: #0a7e6e; text-decoration: none; font-size: 0.9rem; }
+    a.back:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<div class="navbar">
+  <span>⚛️ QML Phishing Detector</span>
+  <a href="/">← Back to Analyser</a>
+</div>
+
+<div class="container">
+  <h1>Bulk URL Checker</h1>
+  <p class="subtitle">Paste up to 50 URLs (one per line) or upload a CSV/TXT file. Each URL is scanned using the Classical SVM model.</p>
+
+  {% if error %}
+  <div class="error-box">{{ error }}</div>
+  {% endif %}
+
+  <div class="card">
+    <form method="POST" action="/bulk-analyse" enctype="multipart/form-data">
+      <label style="font-weight:600; font-size:0.95rem;">Paste URLs (one per line)</label>
+      <textarea name="urls" placeholder="https://example.com&#10;https://suspicious-site.xyz&#10;https://paypal-login.net"></textarea>
+
+      <div class="or-divider">— or upload a file —</div>
+
+      <input type="file" name="file" accept=".csv,.txt">
+      <p class="note">Supported: .txt (one URL per line) or .csv (URLs in first column)</p>
+
+      <button type="submit" class="btn">🔍 Scan All URLs</button>
+    </form>
+  </div>
+
+  {% if results %}
+  <div class="card">
+    <div class="results-header">
+      <h2>Results — {{ results|length }} URL(s) scanned</h2>
+      <button class="btn-csv" onclick="downloadCSV()">⬇ Download CSV</button>
+    </div>
+
+    <table id="results-table">
+      <thead>
+        <tr>
+          <th>URL</th>
+          <th>Verdict</th>
+          <th>Confidence</th>
+          <th>Timestamp</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in results %}
+        <tr>
+          <td style="word-break:break-all; max-width:380px;">{{ r.url }}</td>
+          <td>
+            {% if r.error %}
+              <span class="badge error">Error</span>
+            {% else %}
+              <span class="badge {{ r.label }}">{{ r.label | capitalize }}</span>
+            {% endif %}
+          </td>
+          <td>{% if r.error %}—{% else %}{{ r.confidence }}%{% endif %}</td>
+          <td style="font-size:0.8rem; color:#64748b;">{{ r.timestamp }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    // Store results for CSV download
+    const resultData = {{ results | tojson | safe }};
+
+    function downloadCSV() {
+      fetch('/bulk-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ results: resultData })
+      })
+      .then(res => res.blob())
+      .then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'phishing_analysis.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    }
+  </script>
+  {% endif %}
+
+</div>
+</body>
+</html>

@@ -76,6 +76,19 @@ what's tested locally.
 - **Model Consensus dashboard** — fetches a URL's live content once and
   runs all 5 models against it in one request, highlighting which models
   dissent from the majority vote.
+- **Bulk URL checker** (`/bulk`) — paste up to 50 URLs (one per line) or
+  upload a `.csv`/`.txt` file; duplicates are dropped and each URL is
+  scanned with the Classical (Fair) SVM. Results are shown in a table and
+  can be downloaded as a CSV report.
+- **SSRF-safe fetching** (`flask_app/ssrf_guard.py`) — every live URL fetch
+  (single analyser, site health, bulk checker) resolves the hostname,
+  rejects private/loopback/link-local/metadata-endpoint IPs, and pins the
+  connection to the validated IP for every redirect hop — since the app is
+  publicly deployed, any visitor could otherwise use it to probe internal
+  network addresses.
+
+See `docs/ROADMAP.md` for the supervisor's full feature backlog and what's
+built vs. planned.
 
 ## Quantum execution
 

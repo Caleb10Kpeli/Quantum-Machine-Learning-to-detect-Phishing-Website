@@ -1,5 +1,7 @@
 import os
 import sys
+import csv
+import io
 import json
 import time
 import ssl
@@ -12,7 +14,7 @@ import requests
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, Response
 
 try:
     import whois as python_whois
@@ -22,11 +24,15 @@ except ImportError:
 
 import pennylane as qml
 
+from ssrf_guard import safe_get, resolve_and_validate, BlockedURLError
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from feature_extractor import extract_features, FEATURE_COLUMNS
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024  # 2MB cap on uploads (bulk CSV/TXT)
 MODELS_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
+MAX_BULK_URLS = 50
 
 # ── Classical SVM (Full) — used nowhere in tabs, kept for reference ───────────
 _svm_full    = joblib.load(os.path.join(MODELS_DIR, 'classical_svm.pkl'))
@@ -203,10 +209,9 @@ def fetch_content_features(url, feature_list):
     page_html = None
     site_reachable = True
     try:
-        resp = requests.get(
+        resp = safe_get(
             url, timeout=8,
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
-            allow_redirects=True,
         )
         page_html = resp.text
     except Exception:
@@ -424,18 +429,23 @@ def get_ssl_info(hostname, timeout=6):
     certificate metadata (a failed/self-signed cert is itself a useful signal,
     not something to hide from the user).
     """
+    try:
+        pinned_ip = resolve_and_validate(hostname, 443)
+    except BlockedURLError as e:
+        return {'available': False, 'error': str(e)}
+
     verified = True
     cert = None
     try:
         ctx = ssl.create_default_context()
-        with socket.create_connection((hostname, 443), timeout=timeout) as sock:
+        with socket.create_connection((pinned_ip, 443), timeout=timeout) as sock:
             with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
                 cert = ssock.getpeercert()
     except ssl.SSLCertVerificationError:
         verified = False
         try:
             ctx2 = ssl._create_unverified_context()
-            with socket.create_connection((hostname, 443), timeout=timeout) as sock:
+            with socket.create_connection((pinned_ip, 443), timeout=timeout) as sock:
                 with ctx2.wrap_socket(sock, server_hostname=hostname) as ssock:
                     cert = ssock.getpeercert()
         except Exception as e:
@@ -485,11 +495,17 @@ def check_site_health(url):
 
     try:
         t0 = time.time()
-        resp = requests.get(
-            full_url, timeout=8, allow_redirects=True,
+        resp = safe_get(
+            full_url, timeout=8,
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
         )
         elapsed_ms = round((time.time() - t0) * 1000)
+    except BlockedURLError as e:
+        return {
+            'reachable': False, 'verdict': 'blocked', 'dns_ok': True,
+            'resolved_ip': resolved_ip,
+            'message': f'This URL was blocked for safety: {e}',
+        }
     except requests.exceptions.RequestException as e:
         return {
             'reachable': False, 'verdict': 'unreachable', 'dns_ok': True,
@@ -654,6 +670,61 @@ def record_usage(action):
         )
 
 
+# ── Bulk URL checker ─────────────────────────────────────────────────────────
+def _parse_bulk_urls(req):
+    """Pulls URLs from the pasted textarea and/or an uploaded .csv/.txt file,
+    de-duplicates while preserving order, and caps the total at MAX_BULK_URLS."""
+    urls = []
+
+    for line in req.form.get('urls', '').splitlines():
+        line = line.strip()
+        if line:
+            urls.append(line)
+
+    upload = req.files.get('file')
+    if upload and upload.filename:
+        raw = upload.read().decode('utf-8', errors='ignore')
+        if upload.filename.lower().endswith('.csv'):
+            for row in csv.reader(io.StringIO(raw)):
+                if row and row[0].strip() and row[0].strip().lower() not in ('url', 'urls'):
+                    urls.append(row[0].strip())
+        else:
+            for line in raw.splitlines():
+                line = line.strip()
+                if line:
+                    urls.append(line)
+
+    seen, deduped = set(), []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            deduped.append(u)
+    return deduped[:MAX_BULK_URLS]
+
+
+def _bulk_analyse_one(url):
+    timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+    try:
+        content_vals, _, site_reachable = fetch_content_features(url, fair_svm_features)
+        pred = predict_classical(content_vals)
+        return {
+            'url': url,
+            'label': pred['label'],
+            'confidence': pred['confidence'],
+            'site_reachable': site_reachable,
+            'timestamp': timestamp,
+            'error': None,
+        }
+    except Exception as e:
+        return {
+            'url': url,
+            'label': None,
+            'confidence': None,
+            'timestamp': timestamp,
+            'error': str(e)[:200],
+        }
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/')
 def index():
@@ -756,6 +827,49 @@ def analyse_all():
         'site_status':       site_status,
         'advice':            build_consensus_advice(majority, unanimous, site_status),
     })
+
+
+@app.route('/bulk', methods=['GET'])
+def bulk():
+    return render_template('bulk.html')
+
+
+@app.route('/bulk-analyse', methods=['POST'])
+def bulk_analyse():
+    urls = _parse_bulk_urls(request)
+    if not urls:
+        return render_template(
+            'bulk.html',
+            error='No URLs found. Paste at least one URL (one per line) or upload a .csv/.txt file.',
+        )
+
+    record_usage('bulk_analyse')
+    results = [_bulk_analyse_one(u) for u in urls]
+    return render_template('bulk.html', results=results)
+
+
+@app.route('/bulk-download', methods=['POST'])
+def bulk_download():
+    payload = request.get_json(silent=True) or {}
+    rows = payload.get('results', [])
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['URL', 'Verdict', 'Confidence', 'Timestamp', 'Error'])
+    for r in rows:
+        writer.writerow([
+            r.get('url', ''),
+            (r.get('label') or '').capitalize(),
+            f"{r['confidence']}%" if r.get('confidence') is not None else '',
+            r.get('timestamp', ''),
+            r.get('error') or '',
+        ])
+
+    return Response(
+        buf.getvalue().encode('utf-8-sig'),  # BOM so Excel renders UTF-8 correctly
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=phishing_analysis.csv'},
+    )
 
 
 @app.route('/usage', methods=['GET'])
