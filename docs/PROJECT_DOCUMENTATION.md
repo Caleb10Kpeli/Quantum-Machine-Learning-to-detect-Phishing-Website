@@ -855,6 +855,9 @@ shall be able to perform:
   without letting one failed URL abort the batch.
 - The system shall let the user download the bulk result set as a CSV
   file.
+- The system shall visibly flag any bulk result where the target site
+  could not actually be reached, distinguishing it from a verdict backed
+  by a real page fetch, in both the results table and the CSV export.
 
 **SSRF Protection:**
 - The system shall resolve every submitted URL's hostname and reject
@@ -1076,6 +1079,20 @@ downloaded as a CSV via `POST /bulk-download`, which the client triggers
 by POSTing the already-rendered result set back to the server rather than
 re-scanning — the report is downloadable without re-querying every target
 site a second time.
+
+A distinct failure mode surfaced during live testing on the deployed
+Render instance: a nonexistent domain does not raise an exception at all
+— `fetch_content_features` catches the failed fetch internally and falls
+back to neutral, training-set-mean feature values (the same behaviour the
+single-URL analyser already relies on), so the row still gets a
+label and confidence rather than an error. Left unlabelled, this reads as
+a confident verdict about a site the model never actually saw. Each bulk
+result therefore carries the same `site_reachable` flag `check_site_health`
+already computes, and the results table renders an amber "⚠ Unreachable"
+badge beside the verdict whenever it is `false`, with the CSV export
+carrying the equivalent as a `Reachable` (Yes/No) column — making an
+estimated, unverified verdict visually distinct from one backed by an
+actual page fetch, rather than silently indistinguishable from it.
 
 **SSRF protection.** Because the application is publicly deployed, every
 route that fetches a user-submitted URL — the single analyser, Site
@@ -1309,18 +1326,34 @@ of them from one submission, instead of running the single-URL analyser
 repeatedly. Each row shows the URL, verdict badge (phishing/legitimate/
 error), confidence percentage, and scan timestamp; an error badge is shown
 per-row rather than failing the whole batch when an individual URL cannot
-be scanned. A "Download CSV" button exports the rendered result set as a
-`phishing_analysis.csv` report.
+be scanned. Where a target site could not actually be reached, an amber
+"⚠ Unreachable" badge appears beside the verdict — flagging that the
+result rests on estimated, neutral-default feature values rather than the
+site's real content, instead of presenting it as an equally confident
+verdict. A "Download CSV" button exports the rendered result set as a
+`phishing_analysis.csv` report, including the same reachability flag as a
+`Reachable` column.
 
 **[INSERT SCREENSHOT: Figure 4.10 — Bulk URL Checker page, showing a
 result table with at least one phishing verdict, one legitimate verdict,
-and one error row if possible]**
+and one row carrying the "⚠ Unreachable" badge]**
 
 This feature, along with the CSV download and the SSRF-safe redirect
 handling in `flask_app/ssrf_guard.py` it shares with the single-URL
 analyser and Site Health check, was implemented directly from a
 supervisor-provided prioritised issue list (§3.13); the remaining items on
 that list are tracked as future work in `docs/ROADMAP.md` and §5.2.
+
+**Live verification.** Following deployment, the feature was exercised
+directly against the production Render instance (not just tested locally)
+by submitting a mixed batch — a live, reachable domain and a deliberately
+nonexistent one — to the deployed `/bulk-analyse` endpoint. The reachable
+domain returned a normal verdict with no reachability badge; the
+nonexistent one returned a verdict carrying the "⚠ Unreachable" badge, and
+the corresponding CSV download carried `Reachable,No` for that row and
+`Reachable,Yes` for the other — confirming the indicator behaves correctly
+end-to-end on the live, publicly deployed application rather than only in
+local testing.
 
 ---
 
