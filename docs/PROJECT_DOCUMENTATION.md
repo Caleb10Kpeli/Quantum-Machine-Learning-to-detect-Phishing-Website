@@ -1334,9 +1334,13 @@ verdict. A "Download CSV" button exports the rendered result set as a
 `phishing_analysis.csv` report, including the same reachability flag as a
 `Reachable` column.
 
-**[INSERT SCREENSHOT: Figure 4.10 — Bulk URL Checker page, showing a
-result table with at least one phishing verdict, one legitimate verdict,
-and one row carrying the "⚠ Unreachable" badge]**
+**Figure 4.10** Bulk URL Checker results table, showing a phishing verdict,
+legitimate verdicts, and a row carrying the "⚠ Unreachable" badge.
+*Illustrative example — the phishing row was synthesised for
+demonstration purposes, since a live, currently-reachable URL that the
+Classical (Fair) SVM scores as phishing could not be obtained during
+testing (see §4.10 discussion above); the other rows reflect values
+observed during genuine live testing against the deployed application.*
 
 This feature, along with the CSV download and the SSRF-safe redirect
 handling in `flask_app/ssrf_guard.py` it shares with the single-URL
