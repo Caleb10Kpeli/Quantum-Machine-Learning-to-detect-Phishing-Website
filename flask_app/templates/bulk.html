@@ -34,6 +34,7 @@
     .badge.phishing { background: #fef2f2; color: #dc2626; }
     .badge.legitimate { background: #f0fdf4; color: #16a34a; }
     .badge.error { background: #fff7ed; color: #ea580c; }
+    .badge.unreachable { background: #f1f5f9; color: #64748b; margin-left: 0.4rem; }
     .note { font-size: 0.82rem; color: #94a3b8; margin-top: 0.5rem; }
     a.back { color: #0a7e6e; text-decoration: none; font-size: 0.9rem; }
     a.back:hover { text-decoration: underline; }
@@ -93,6 +94,9 @@
               <span class="badge error">Error</span>
             {% else %}
               <span class="badge {{ r.label }}">{{ r.label | capitalize }}</span>
+              {% if r.site_reachable == false %}
+                <span class="badge unreachable" title="The live page could not be fetched — this verdict is based on estimated/default feature values, not the site's actual content.">⚠ Unreachable</span>
+              {% endif %}
             {% endif %}
           </td>
           <td>{% if r.error %}—{% else %}{{ r.confidence }}%{% endif %}</td>

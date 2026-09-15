@@ -855,12 +855,14 @@ def bulk_download():
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(['URL', 'Verdict', 'Confidence', 'Timestamp', 'Error'])
+    writer.writerow(['URL', 'Verdict', 'Confidence', 'Reachable', 'Timestamp', 'Error'])
     for r in rows:
+        reachable = r.get('site_reachable')
         writer.writerow([
             r.get('url', ''),
             (r.get('label') or '').capitalize(),
             f"{r['confidence']}%" if r.get('confidence') is not None else '',
+            '' if reachable is None else ('Yes' if reachable else 'No'),
             r.get('timestamp', ''),
             r.get('error') or '',
         ])
