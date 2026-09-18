@@ -36,6 +36,17 @@ h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 6px; }
 a { color: var(--quantum); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
+/* ── Powered-by badge ─────────────────────────────────────────────────────── */
+.powered-by-badge {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  height: 28px;
+  z-index: 1000;
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
 /* ── Header ───────────────────────────────────────────────────────────────── */
 header {
   background: var(--bg-alt);
