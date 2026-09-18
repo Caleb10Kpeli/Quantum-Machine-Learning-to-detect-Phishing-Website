@@ -9,11 +9,18 @@
 <body>
 
 <!-- ── Powered-by badge ─────────────────────────────────────────────────────── -->
-<img
-  src="{{ url_for('static', filename='powered-by-qananse.jpg') }}"
-  alt="Powered by QAnanse Lab"
-  class="powered-by-badge"
-/>
+<a
+  href="https://www.researchgate.net/lab/QAnanse-Lab-Peter-Nimbe"
+  target="_blank"
+  rel="noopener noreferrer"
+  class="powered-by-badge-link"
+>
+  <img
+    src="{{ url_for('static', filename='powered-by-qananse.jpg') }}"
+    alt="Powered by QAnanse Lab"
+    class="powered-by-badge"
+  />
+</a>
 
 <!-- ── Status bar ───────────────────────────────────────────────────────────── -->
 <div class="status-bar">
